@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from datetime import datetime, timedelta
 from opencc import OpenCC
-# import akshare as ak
+import akshare as ak
 import xgboost as xgb
 import smtplib
 import os
