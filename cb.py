@@ -240,7 +240,7 @@ def send_email_report(df_result):
 if __name__ == "__main__":
 
     # today = datetime.now().strftime('%Y%m%d')
-    today = get_offset_date(-1)
+    today = get_offset_date(0)
     if is_today_trading_day(today):
         print(f"今天是交易日 {today}")
         # 1. 获取与合并数据

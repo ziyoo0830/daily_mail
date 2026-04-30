@@ -152,7 +152,7 @@ def scan_drop_from_high(hk_list):
     (保留原逻辑)
     """
     results = []
-    today = get_offset_date(-1)
+    today = get_offset_date(0)
     start_date = get_offset_date(-Config.LOOKBACK_DAYS)
     
     for _, row in hk_list.iterrows():
