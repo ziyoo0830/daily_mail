@@ -16,7 +16,8 @@ import io
 import traceback
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from typing import Optional, List, Dictimport sys
+from typing import Optional, List, Dict
+import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
