@@ -1,22 +1,22 @@
 # Core Data & Processing
 xcsc-tushare==1.0.3
-pandas==3.0.0
-numpy==2.4.1
+pandas==2.2.3
+numpy==1.26.4
 
 # Technical Analysis
 TA-Lib==0.6.8
 
 # Machine Learning
-xgboost==3.2.0
+xgboost==2.1.4
 
 # Financial Data
-akshare==1.18.19
+akshare==1.15.94
 
 # Text Processing
-OpenCC==1.2.0
+OpenCC==1.1.7
 
 # Visualization
-matplotlib==3.10.8
+matplotlib==3.9.4
 
 # Excel Support
 openpyxl==3.1.5
