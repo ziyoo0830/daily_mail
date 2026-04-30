@@ -21,22 +21,6 @@ import sys
 import io
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
 
-import xcsc_tushare as ts
-import pandas as pd
-import numpy as np
-import talib as ta
-import datetime
-import warnings
-import logging
-import smtplib
-import time
-import base64
-import io
-import traceback
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
-from typing import Optional, List, Dict
-
 try:
     import matplotlib
     matplotlib.use('Agg')
