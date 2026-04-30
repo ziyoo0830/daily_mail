@@ -29,7 +29,8 @@ jobs:
           python -m pip install --upgrade pip
           # pip install xcsc_tushare pandas openpyxl
           # 如果还有其他依赖，继续添加
-          pip install -r requirements  
+          pip install -r requirements 
+           
 
       # 4. 配置 Tushare Token（从 Secrets 获取）
       - name: Configure environment
