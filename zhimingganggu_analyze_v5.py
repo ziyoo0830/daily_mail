@@ -212,7 +212,7 @@ def send_email_report(df, subject="📊 港股技术面扫描日报"):
         print("⚠️ 结果为空，跳过邮件。"); return
     try:
         msg = MIMEMultipart()
-        msg['From'] = formataddr(("量化助手", Config.EMAIL_USER), charset='utf-8')
+        msg['From'] = formataddr(("260319029", Config.EMAIL_USER), charset='utf-8')
         msg['To'] = Header(f"管理员 <{Config.EMAIL_RECEIVER[0]}>", 'utf-8')
         msg['Subject'] = Header(f"{subject} {get_offset_date(0)}", 'utf-8')
 
