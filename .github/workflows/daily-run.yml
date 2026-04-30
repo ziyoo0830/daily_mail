@@ -40,10 +40,8 @@ jobs:
           echo "Environment configured"
 
       # 5. 运行脚本
-      - name: Run Python scripts
+      - name: Run zhishuv5.py
         env:
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           PYTHONIOENCODING: utf-8
         run: |
           chcp 65001
@@ -51,7 +49,28 @@ jobs:
           python zhishuv6.py
           python cb.py
           python zhimingganggu_analyze_v3.py
-  
+      - name: Run zhishuv6.py
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          chcp 65001
+          python zhishuv6.py
+          python cb.py
+          python zhimingganggu_analyze_v3.py
+
+      - name: Run cb.py
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          chcp 65001
+          python cb.py
+          
+      - name: Run zhimingganggu_analyze_v3.py
+        env:
+          PYTHONIOENCODING: utf-8
+        run: |
+          chcp 65001
+          python zhimingganggu_analyze_v3.py
 
       # 6. 上传生成的文件（如果有输出文件）
       - name: Upload artifacts
