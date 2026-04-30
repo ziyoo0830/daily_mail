@@ -146,6 +146,8 @@ class IndexStrategyAnalyzer:
         df["obv"] = ta.OBV(c, v)
         df["obv_ma_20"] = ta.MA(df["obv"].values, 20)
         df["vol_ma_20"] = ta.SMA(v, 20)
+        df["plus_di"] = ta.PLUS_DI(h, l, c, timeperiod=14)
+        df["minus_di"] = ta.MINUS_DI(h, l, c, timeperiod=14)
         df["adx"] = ta.ADX(h, l, c, timeperiod=14)
         
         df["bias_20"] = (c / df["ma_20"].values - 1) * 100
@@ -300,34 +302,88 @@ class IndexStrategyAnalyzer:
         return df
 
 
-# ================= 绘图函数（增强健壮性） =================
-def create_price_with_bollinger_chart(df_long: pd.DataFrame, title: str, target_period: int = 60) -> Optional[str]:
-    if not MATPLOTLIB_AVAILABLE or df_long is None: return None
+# ================= 绘图函数（沿用zhishuv5.py逻辑） =================
+def create_static_bias_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
+    """生成20日乖离率曲线图"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or len(df_long) < 20:
+        return None
     try:
-        required = ['trade_date', 'close']
-        if not all(col in df_long.columns for col in required):
-            return None
-        df = df_long.copy().sort_values('trade_date')
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
         df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
-        c = df['close'].values.astype(np.float64)
+        bias = (df['close'] / df['ma_20'] - 1) * 100
+
+        fig, ax = plt.subplots(figsize=(12, 5))
+        ax.plot(df['date_dt'], bias, color='blue', linewidth=1.5, label='20日乖离率(%)')
+        ax.axhline(y=0, color='red', linestyle='--', linewidth=1, alpha=0.7, label='零轴')
+        ax.fill_between(df['date_dt'], bias, 0, where=(bias >= 0), color='red', alpha=0.2, interpolate=True)
+        ax.fill_between(df['date_dt'], bias, 0, where=(bias < 0), color='green', alpha=0.2, interpolate=True)
+
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m-%d'))
+        ax.xaxis.set_major_locator(mdates.AutoDateLocator())
+        plt.xticks(rotation=45, ha='right')
+        ax.set_title(f'{title} - 20日乖离率曲线 (近3年)', fontsize=12)
+        ax.set_ylabel('乖离率 (%)')
+        ax.set_xlabel('交易日期')
+        ax.grid(True, linestyle=':', alpha=0.6)
+        ax.legend(loc='best')
+        plt.tight_layout()
+
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        buffer.seek(0)
+        img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
+        plt.close(fig)
+        return img_base64
+    except Exception as e:
+        logging.error(f"生成静态乖离率图失败 {title}: {e}")
+        return None
+
+
+def create_price_with_bollinger_chart(df_long: pd.DataFrame, title: str, target_period: int = 60) -> Optional[str]:
+    """绘制收盘价 + 布林带"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or len(df_long) < 20:
+        logging.warning(f"{title} 数据不足20条，无法生成布林带图")
+        return None
+    try:
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
+        df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+        close = df['close'].values.astype(np.float64)
+        data_len = len(close)
         
-        period = target_period if len(c) >= target_period else 20
-        upper, middle, lower = ta.BBANDS(c, timeperiod=period, nbdevup=2, nbdevdn=2)
-        df['boll_mid'], df['boll_up'], df['boll_low'] = middle, upper, lower
+        # 确定布林带周期
+        if data_len >= target_period:
+            period = target_period
+            logging.info(f"{title} 数据长度 {data_len} >= {target_period}，使用 {period} 日布林带")
+        else:
+            period = data_len - 1
+            if period < 20:
+                period = 20
+            logging.warning(f"{title} 数据长度 {data_len} < {target_period}，降级使用 {period} 日布林带")
+        
+        # 计算布林带
+        upper, middle, lower = ta.BBANDS(close, timeperiod=period, nbdevup=2, nbdevdn=2, matype=0)
+        df['boll_mid'] = middle
+        df['boll_up'] = upper
+        df['boll_low'] = lower
         
         fig, ax = plt.subplots(figsize=(12, 6))
-        ax.plot(df['date_dt'], c, label='收盘价', color='black', linewidth=1)
-        ax.plot(df['date_dt'], df['boll_mid'], label=f'{period}日均线', color='blue', linestyle='--', linewidth=1)
-        ax.plot(df['date_dt'], df['boll_up'], label='上轨', color='red', linestyle=':', linewidth=1)
-        ax.plot(df['date_dt'], df['boll_low'], label='下轨', color='green', linestyle=':', linewidth=1)
+        ax.plot(df['date_dt'], close, label='收盘价', color='black', linewidth=1)
+        ax.plot(df['date_dt'], df['boll_mid'], label=f'{period}日均线（中轨）', color='blue', linestyle='--', linewidth=1)
+        ax.plot(df['date_dt'], df['boll_up'], label='上轨 (+2σ)', color='red', linestyle=':', linewidth=1)
+        ax.plot(df['date_dt'], df['boll_low'], label='下轨 (-2σ)', color='green', linestyle=':', linewidth=1)
         ax.fill_between(df['date_dt'], df['boll_up'], df['boll_low'], alpha=0.1, color='gray')
         
+        # 使用更稀疏的刻度
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        
         plt.xticks(rotation=45, ha='right')
         
         ax.set_title(f'{title} - 收盘价与{period}日布林带', fontsize=12)
         ax.set_ylabel('价格')
+        ax.set_xlabel('交易日期')
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.legend(loc='best')
         plt.tight_layout()
@@ -335,37 +391,34 @@ def create_price_with_bollinger_chart(df_long: pd.DataFrame, title: str, target_
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
         buffer.seek(0)
-        img_b64 = base64.b64encode(buffer.read()).decode('utf-8')
+        img_base64 = base64.b64encode(buffer.read()).decode('utf-8')
         plt.close(fig)
-        return img_b64
+        return img_base64
     except Exception as e:
-        logging.warning(f"绘制布林带图失败: {e}")
-        if 'fig' in locals(): plt.close(fig)
+        logging.error(f"生成布林带图失败 {title}: {e}")
         return None
 
-def create_static_bias_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
-    if not MATPLOTLIB_AVAILABLE or df_long is None: return None
+
+def create_atr_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
+    """ATR波动率曲线"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or 'atr_14' not in df_long.columns:
+        return None
     try:
-        required = ['trade_date', 'close', 'ma_20']
-        if not all(col in df_long.columns for col in required):
-            return None
-        df = df_long.copy().sort_values('trade_date')
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
         df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
-        bias = (df['close'] / df['ma_20'] - 1) * 100
         
         fig, ax = plt.subplots(figsize=(12, 4))
-        ax.plot(df['date_dt'], bias, color='blue', linewidth=1.5, label='20日乖离率(%)')
-        ax.axhline(y=0, color='red', linestyle='--', linewidth=1, alpha=0.7)
-        ax.axhline(y=5, color='orange', linestyle=':', linewidth=1, alpha=0.5)
-        ax.fill_between(df['date_dt'], bias, 0, where=(bias >= 0), color='red', alpha=0.2)
-        ax.fill_between(df['date_dt'], bias, 0, where=(bias < 0), color='green', alpha=0.2)
+        ax.plot(df['date_dt'], df['atr_14'], label='ATR(14)', color='orange', linewidth=1.5)
+        ax.fill_between(df['date_dt'], df['atr_14'], alpha=0.3, color='orange')
         
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
         plt.xticks(rotation=45, ha='right')
         
-        ax.set_title(f'{title} - 20日乖离率', fontsize=12)
-        ax.set_ylabel('乖离率 (%)')
+        ax.set_title(f'{title} - ATR波动率', fontsize=12)
+        ax.set_ylabel('ATR值')
+        ax.set_xlabel('交易日期')
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.legend(loc='best')
         plt.tight_layout()
@@ -373,34 +426,77 @@ def create_static_bias_chart(df_long: pd.DataFrame, title: str) -> Optional[str]
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
         buffer.seek(0)
-        img_b64 = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close(fig)
-        return img_b64
+        return base64.b64encode(buffer.read()).decode('utf-8')
     except Exception as e:
-        logging.warning(f"绘制乖离率图失败: {e}")
-        if 'fig' in locals(): plt.close(fig)
+        logging.error(f"生成ATR图失败 {title}: {e}")
         return None
 
-def create_rsi_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
-    if not MATPLOTLIB_AVAILABLE or df_long is None: return None
+
+def create_obv_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
+    """OBV能量潮曲线"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or 'obv' not in df_long.columns:
+        return None
     try:
-        required = ['trade_date', 'rsi_14']
-        if not all(col in df_long.columns for col in required):
-            return None
-        df = df_long.copy().sort_values('trade_date')
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
         df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
         
-        fig, ax = plt.subplots(figsize=(12, 3))
-        ax.plot(df['date_dt'], df['rsi_14'], label='RSI(14)', color='purple', linewidth=1.5)
-        ax.axhline(y=70, color='red', linestyle='--', alpha=0.5, label='超买线')
-        ax.axhline(y=30, color='green', linestyle='--', alpha=0.5, label='超卖线')
-        ax.set_ylim(0, 100)
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 7), sharex=True, gridspec_kw={'height_ratios': [2, 1]})
+        
+        # 上图：价格
+        ax1.plot(df['date_dt'], df['close'], label='收盘价', color='black', linewidth=1)
+        ax1.set_title(f'{title} - 价格与OBV')
+        ax1.set_ylabel('价格')
+        ax1.grid(True, linestyle=':', alpha=0.6)
+        ax1.legend(loc='best')
+        
+        # 下图：OBV
+        ax2.plot(df['date_dt'], df['obv'], label='OBV', color='blue', linewidth=1)
+        ax2.plot(df['date_dt'], df['obv_ma_20'], label='OBV MA20', color='red', linestyle='--', linewidth=1)
+        ax2.set_ylabel('OBV')
+        ax2.set_xlabel('日期')
+        ax2.grid(True, linestyle=':', alpha=0.6)
+        ax2.legend(loc='best')
+        
+        ax2.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        ax2.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        plt.xticks(rotation=45, ha='right')
+        plt.tight_layout()
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        buffer.seek(0)
+        return base64.b64encode(buffer.read()).decode('utf-8')
+    except Exception as e:
+        logging.error(f"生成OBV图失败 {title}: {e}")
+        return None
+
+
+def create_adx_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
+    """ADX趋势强度曲线"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or 'adx' not in df_long.columns:
+        return None
+    try:
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
+        df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+        
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(df['date_dt'], df['adx'], label='ADX', color='purple', linewidth=1.5)
+        ax.plot(df['date_dt'], df['plus_di'], label='+DI', color='green', linestyle='--', linewidth=1)
+        ax.plot(df['date_dt'], df['minus_di'], label='-DI', color='red', linestyle='--', linewidth=1)
+        
+        # 添加趋势强度参考线
+        ax.axhline(y=25, color='gray', linestyle=':', linewidth=1, alpha=0.7)
+        ax.axhline(y=50, color='gray', linestyle=':', linewidth=1, alpha=0.7)
         
         ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
         ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
         plt.xticks(rotation=45, ha='right')
         
-        ax.set_title(f'{title} - RSI相对强弱', fontsize=12)
+        ax.set_title(f'{title} - ADX趋势强度', fontsize=12)
+        ax.set_ylabel('ADX/DI值')
+        ax.set_xlabel('交易日期')
         ax.grid(True, linestyle=':', alpha=0.6)
         ax.legend(loc='best')
         plt.tight_layout()
@@ -408,12 +504,47 @@ def create_rsi_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
         buffer = io.BytesIO()
         plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
         buffer.seek(0)
-        img_b64 = base64.b64encode(buffer.read()).decode('utf-8')
-        plt.close(fig)
-        return img_b64
+        return base64.b64encode(buffer.read()).decode('utf-8')
     except Exception as e:
-        logging.warning(f"绘制RSI图失败: {e}")
-        if 'fig' in locals(): plt.close(fig)
+        logging.error(f"生成ADX图失败 {title}: {e}")
+        return None
+
+
+def create_rsi_chart(df_long: pd.DataFrame, title: str) -> Optional[str]:
+    """RSI相对强弱指标"""
+    if not MATPLOTLIB_AVAILABLE or df_long is None or 'rsi_14' not in df_long.columns:
+        return None
+    try:
+        df = df_long.copy()
+        df.sort_values('trade_date', inplace=True)
+        df['date_dt'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+        
+        fig, ax = plt.subplots(figsize=(12, 4))
+        ax.plot(df['date_dt'], df['rsi_14'], label='RSI(14)', color='blue', linewidth=1.5)
+        
+        # 添加超买超卖线
+        ax.axhline(y=70, color='red', linestyle='--', linewidth=1, alpha=0.7, label='超买线')
+        ax.axhline(y=30, color='green', linestyle='--', linewidth=1, alpha=0.7, label='超卖线')
+        ax.axhline(y=50, color='gray', linestyle=':', linewidth=1, alpha=0.5)
+        
+        ax.set_ylim(0, 100)
+        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=3))
+        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
+        plt.xticks(rotation=45, ha='right')
+        
+        ax.set_title(f'{title} - RSI相对强弱指标', fontsize=12)
+        ax.set_ylabel('RSI值')
+        ax.set_xlabel('交易日期')
+        ax.grid(True, linestyle=':', alpha=0.6)
+        ax.legend(loc='best')
+        plt.tight_layout()
+        
+        buffer = io.BytesIO()
+        plt.savefig(buffer, format='png', dpi=100, bbox_inches='tight')
+        buffer.seek(0)
+        return base64.b64encode(buffer.read()).decode('utf-8')
+    except Exception as e:
+        logging.error(f"生成RSI图失败 {title}: {e}")
         return None
 
 
@@ -455,37 +586,85 @@ def send_email_report(analyzer, results_with_df, config):
             </tr>"""
         html_body += "</table><hr>"
 
+        html_body += """
+        <h3 style="font-size: 13px;">📉 技术指标图表（近3年）</h3>
+        <p style="font-size: 10px; color: gray;">包含：乖离率、布林带、ATR波动率、OBV资金流向、ADX趋势强度、RSI超买超卖</p>
+        """
+
         # 图表区域
         for item in results_with_df:
             s = item['signal']
             code = s.get('code', '')
             name = s.get('name', '')
-            df_long = analyzer.get_long_term_data(code)
-            if df_long is None: 
-                continue
+            short_code = code[:6]
             
+            df_long = analyzer.get_long_term_data(code, years=3, min_rows=250)
+            if df_long is None:
+                html_body += f"<p><strong>{short_code} {name}</strong> 无法获取3年数据，图表生成失败</p>"
+                continue
+
             if s.get('score', 0) < 10: 
                 continue
 
-            img_boll = create_price_with_bollinger_chart(df_long, f"{name} ({code[:6]})")
-            img_bias = create_static_bias_chart(df_long, f"{name} ({code[:6]})")
-            img_rsi = create_rsi_chart(df_long, f"{name} ({code[:6]})")
-
-            if not any([img_boll, img_bias, img_rsi]):
-                continue
-
-            html_body += f"""
-            <h3 style="border-bottom: 2px solid #ddd; padding-bottom: 5px;">{code[:6]} {name}</h3>
-            <p>策略建议：{s.get('action', '')}</p>
-            <div style="display: flex; flex-wrap: wrap; gap: 10px;">
-            """
-            if img_boll:
-                html_body += f'<div><img src="data:image/png;base64,{img_boll}" style="max-width: 48%; height: auto;"></div>'
+            # 1. 乖离率图
+            img_bias = create_static_bias_chart(df_long, f"{short_code} {name}")
             if img_bias:
-                html_body += f'<div><img src="data:image/png;base64,{img_bias}" style="max-width: 48%; height: auto;"></div>'
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - 20日乖离率</strong></p>
+                    <img src="data:image/png;base64,{img_bias}" style="max-width: 100%; height: auto;">
+                </div>
+                """
+
+            # 2. 布林带图
+            img_boll = create_price_with_bollinger_chart(df_long, f"{short_code} {name}", target_period=60)
+            if img_boll:
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - 布林带（60日周期）</strong></p>
+                    <img src="data:image/png;base64,{img_boll}" style="max-width: 100%; height: auto;">
+                </div>
+                """
+
+            # 3. ATR波动率图
+            img_atr = create_atr_chart(df_long, f"{short_code} {name}")
+            if img_atr:
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - ATR波动率</strong></p>
+                    <img src="data:image/png;base64,{img_atr}" style="max-width: 100%; height: auto;">
+                </div>
+                """
+
+            # 4. OBV资金流向图
+            img_obv = create_obv_chart(df_long, f"{short_code} {name}")
+            if img_obv:
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - OBV能量潮</strong></p>
+                    <img src="data:image/png;base64,{img_obv}" style="max-width: 100%; height: auto;">
+                </div>
+                """
+
+            # 5. ADX趋势强度图
+            img_adx = create_adx_chart(df_long, f"{short_code} {name}")
+            if img_adx:
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - ADX趋势强度</strong></p>
+                    <img src="data:image/png;base64,{img_adx}" style="max-width: 100%; height: auto;">
+                </div>
+                """
+
+            # 6. RSI超买超卖图
+            img_rsi = create_rsi_chart(df_long, f"{short_code} {name}")
             if img_rsi:
-                html_body += f'<div><img src="data:image/png;base64,{img_rsi}" style="max-width: 48%; height: auto;"></div>'
-            html_body += "</div><br>"
+                html_body += f"""
+                <div style="margin-bottom: 20px; border-top: 1px solid #ddd; padding-top: 10px;">
+                    <p><strong>{short_code} {name} - RSI相对强弱</strong></p>
+                    <img src="data:image/png;base64,{img_rsi}" style="max-width: 100%; height: auto;">
+                </div>
+                """
 
         html_body += "</body></html>"
 

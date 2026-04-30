@@ -693,7 +693,18 @@ def main():
         send_email_report(df_renamed[cols_to_save], "港股超跌精选报告")
         
     else:
-        print("❌ 深度分析未产生任何结果。")
+        print("❌ 深度分析未产生任何结果。发送仅含初始筛选列的结果。")
+        df_screening = result_df.copy()
+        df_screening = df_screening.rename(columns={
+            'ts_code': 'code',
+            'close': 'price'
+        })
+        if 'code' in df_screening.columns:
+            df_screening['code'] = df_screening['code'].astype(str).str.replace('.HK', '', regex=False)
+        deep_analysis_cols = ['sc', 'ml_prob', 'action', 'status', '止损位', '止盈位', 'signals', '盈亏比']
+        cols_to_save = [col for col in df_screening.columns if col not in deep_analysis_cols]
+        df_screening = df_screening.sort_values(by='drop', ascending=False)
+        send_email_report(df_screening[cols_to_save], "港股超跌初筛报告（深度分析无结果）")
 
 if __name__ == "__main__":
     main()
