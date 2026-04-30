@@ -17,3 +17,6 @@ matplotlib==3.9.4
 
 # Excel Support
 openpyxl==3.1.5
+
+# Financial Data
+akshare
