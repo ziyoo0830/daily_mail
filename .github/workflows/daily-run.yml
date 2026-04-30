@@ -47,10 +47,11 @@ jobs:
           PYTHONIOENCODING: utf-8
         run: |
           chcp 65001
-          python cb.py
-          python zhimingganggu_analyze_v3.py
           python zhishuv5.py
           python zhishuv6.py
+          python cb.py
+          python zhimingganggu_analyze_v3.py
+  
 
       # 6. 上传生成的文件（如果有输出文件）
       - name: Upload artifacts
