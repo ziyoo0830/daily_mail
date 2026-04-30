@@ -1,5 +1,4 @@
 NEW_FILE_CODE
-name: Daily Python Script Execution
 
 on:
   schedule:
