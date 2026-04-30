@@ -7,6 +7,10 @@
 修复重点：修正止盈/止损位计算逻辑，确保 止盈 > 现价 > 止损
 """
 
+import sys
+import io
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
 import xcsc_tushare as ts
 import pandas as pd
 import numpy as np
