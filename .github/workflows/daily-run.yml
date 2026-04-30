@@ -67,6 +67,14 @@ jobs:
           chcp 65001
           python zhimingganggu_analyze_v3.py
 
+      - name: Run zhimingganggu_analyze_v5.py
+        env:
+          PYTHONIOENCODING: utf-8
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          chcp 65001
+          python zhimingganggu_analyze_v5.py
       # 5. 上传生成的文件（如果有输出文件）
       - name: Upload artifacts
         if: always()
