@@ -704,7 +704,7 @@ def main():
         deep_analysis_cols = ['sc', 'ml_prob', 'action', 'status', '止损位', '止盈位', 'signals', '盈亏比']
         cols_to_save = [col for col in df_screening.columns if col not in deep_analysis_cols]
         df_screening = df_screening.sort_values(by='drop', ascending=False)
-        send_email_report(df_screening[cols_to_save], "港股超跌初筛报告（深度分析无结果）")
+        send_email_report(df_screening[cols_to_save], "港股超跌初筛报告(深度分析无结果)")
 
 if __name__ == "__main__":
     main()
