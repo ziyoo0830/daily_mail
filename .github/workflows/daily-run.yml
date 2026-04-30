@@ -1,5 +1,3 @@
-NEW_FILE_CODE
-
 on:
   schedule:
     # 每天 UTC 时间 12:00 执行（北京时间 08:00）
