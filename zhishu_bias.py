@@ -39,7 +39,7 @@ class Config:
     MA_PERIOD = 20
     BOLL_PERIOD = 60  # 🆕 布林带周期
     BOLL_STD = 2       # 🆕 布林带标准差倍数
-    DAYS_OFFSET = 4
+    DAYS_OFFSET = 0
     
     # 🎯 异常值处理配置
     OUTLIER_METHOD = 'winsorize'
@@ -64,7 +64,7 @@ class Config:
     }
     
     # 📅 执行日期配置 (0=周一, 6=周日)
-    WEEKDAY_EXECUTION = [1, 3, 6]
+    WEEKDAY_EXECUTION = [1, 3]
     
     # 🆕 图表类型配置（可选：['bias'], ['boll'], ['bias','boll']）
     CHART_TYPES = ['bias', 'boll']

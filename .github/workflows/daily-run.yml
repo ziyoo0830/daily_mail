@@ -31,23 +31,23 @@ jobs:
           pip install -r requirements.txt
 
       # 4. 运行脚本（每个脚本独立步骤）
-      - name: Run zhishuv5.py
-        env:
-          PYTHONIOENCODING: utf-8
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        run: |
-          chcp 65001
-          python zhishuv5.py
+      #- name: Run zhishuv5.py
+      #  env:
+      #    PYTHONIOENCODING: utf-8
+      #    TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      #    EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      #  run: |
+      #    chcp 65001
+      #    python zhishuv5.py
 
-      - name: Run zhishuv6.py
-        env:
-          PYTHONIOENCODING: utf-8
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        run: |
-          chcp 65001
-          python zhishuv6.py
+      #- name: Run zhishuv6.py
+      #  env:
+      #    PYTHONIOENCODING: utf-8
+      #    TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      #    EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      #  run: |
+      #    chcp 65001
+      #    python zhishuv6.py
 
       - name: Run cb.py
         env:
@@ -58,14 +58,14 @@ jobs:
           chcp 65001
           python cb.py
 
-      - name: Run zhimingganggu_analyze_v3.py
-        env:
-          PYTHONIOENCODING: utf-8
-          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
-        run: |
-          chcp 65001
-          python zhimingganggu_analyze_v3.py
+      # - name: Run zhimingganggu_analyze_v3.py
+      #  env:
+      #    PYTHONIOENCODING: utf-8
+      #    TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+      #    EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+      #  run: |
+      #    chcp 65001
+      #    python zhimingganggu_analyze_v3.py
 
       - name: Run zhimingganggu_analyze_v5.py
         env:
@@ -75,6 +75,24 @@ jobs:
         run: |
           chcp 65001
           python zhimingganggu_analyze_v5.py
+          
+      - name: Run zhishu_bias.py
+        env:
+          PYTHONIOENCODING: utf-8
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          chcp 65001
+          python zhishu_bias.py
+      
+      - name: Run etf_bias.py
+        env:
+          PYTHONIOENCODING: utf-8
+          TUSHARE_TOKEN: ${{ secrets.TUSHARE_TOKEN }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          chcp 65001
+          python etf_bias.py      
       # 5. 上传生成的文件（如果有输出文件）
       - name: Upload artifacts
         if: always()

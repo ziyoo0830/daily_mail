@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-ETF乖离率分析工具 - 邮件表格版（图片本地保存）
-功能：动态获取场内ETF，智能筛选，计算20日乖离率，邮件仅发送彩色表格，图表本地保存
+ETF乖离率分析工具 - 邮件表格版（内存绘图+极低位图表内嵌）
+功能：动态获取场内ETF，智能筛选，计算20日乖离率，邮件发送彩色表格+极低位标的双图
 """
 
 # ================= 导入区域 =================
@@ -18,12 +18,15 @@ import os
 import re
 import logging
 import warnings
+import io
+import base64
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict
 # 邮件相关导入
 import smtplib
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+from email.mime.image import MIMEImage
 
 # ================= 配置常量 =================
 class Config:
@@ -38,7 +41,6 @@ class Config:
     WINSORIZE_LIMITS = (0.02, 0.98)
     ROLLING_WINDOW = 252
     
-    EXPORT_DIR = "./etf_bias_charts"  # 🆕 本地图片保存目录
     LOG_FORMAT = "%(asctime)s %(message)s"
     LOG_LEVEL = logging.INFO
     FONT_CANDIDATES = ['SimHei', 'Microsoft YaHei', 'KaiTi', 'FangSong']
@@ -53,6 +55,7 @@ class Config:
     }
     
     WEEKDAY_EXECUTION = [0, 1, 2, 3, 4, 5, 6]
+    EXTREME_THRESHOLD = 5  # 🎯 极低位分位阈值(%)
 
 # ================= 全局初始化 =================
 warnings.filterwarnings("ignore")
@@ -107,10 +110,31 @@ def get_row_style(pct: float) -> str:
     elif pct < 95: return 'style="background:#ffebee;"'
     else: return 'style="background:#ffcdd2;"'
 
-# ================= 邮件发送函数（仅表格） =================
-def send_bias_email(results: List[Dict], config: Dict) -> bool:
+def clean_benchmark(benchmark: str) -> str:
+    """清洗benchmark字段：1)去括号内容 2)去*95%+后缀 3)指数收益率→指数"""
+    if not benchmark or not isinstance(benchmark, str):
+        return benchmark
+    
+    # 1. 尾部是)，去除最后一个(及其中间内容
+    if benchmark.rstrip().endswith(')'):
+        idx = benchmark.rfind('(')
+        if idx != -1:
+            benchmark = benchmark[:idx].rstrip()
+    
+    # 2. 包含*95%+，截断该标记及之后内容
+    if '*95%+' in benchmark:
+        benchmark = benchmark.split('*95%+')[0].rstrip()
+    
+    # 3. 尾部"指数收益率"替换为"指数"
+    if benchmark.rstrip().endswith('指数收益率'):
+        benchmark = benchmark.rstrip()[:-5] + '指数'
+    
+    return benchmark.strip()
+
+# ================= 邮件发送函数（表格+内嵌图表） =================
+def send_bias_email(results: List[Dict], extreme_charts: List[Dict], config: Dict) -> bool:
     try:
-        msg = MIMEMultipart()
+        msg = MIMEMultipart('related')
         msg['From'] = config['sender']
         msg['To'] = config['receiver']
         msg['Subject'] = f"📊 ETF乖离率日报 {datetime.now().strftime('%Y-%m-%d')}"
@@ -119,9 +143,12 @@ def send_bias_email(results: List[Dict], config: Dict) -> bool:
         <html><head><style>
             body {{ font-family:Microsoft YaHei,sans-serif; font-size:13px; line-height:1.5; }}
             h3 {{ color:#2E86AB; margin:0 0 15px 0; }}
+            h4 {{ color:#555; margin:20px 0 10px 0; border-bottom:2px solid #eee; padding-bottom:5px; }}
             table {{ border-collapse:collapse; width:100%; margin:10px 0; }}
             th {{ background:#f5f5f5; padding:8px; text-align:left; border:1px solid #ddd; }}
             td {{ padding:6px 8px; border:1px solid #eee; }}
+            .chart-box {{ margin:15px 0; padding:12px; border:1px solid #e0e0e0; border-radius:6px; background:#fafafa; }}
+            .chart-title {{ font-weight:bold; color:#333; margin-bottom:8px; }}
         </style></head><body>
         <h3>📈 场内ETF乖离率分析报告</h3>
         <p><b>分析时间：</b>{datetime.now().strftime('%Y-%m-%d %H:%M')}<br>
@@ -145,15 +172,42 @@ def send_bias_email(results: List[Dict], config: Dict) -> bool:
             html += f"<td>{r['bias_mean']:+.2f}%</td><td>{r['bias_std']:.2f}%</td>"
             html += f"<td>[{sigma2_low:+.2f}%, {sigma2_high:+.2f}%]</td></tr>"
         html += "</table>"
+        
+        # 🖼️ 添加极低位标的图表（分位 < 5%）
+        if extreme_charts:
+            html += f"<h4>🔍 极低位标的详细图表（分位 &lt; {Config.EXTREME_THRESHOLD}%）</h4>"
+            for i, chart in enumerate(extreme_charts):
+                html += f"""
+                <div class="chart-box">
+                    <div class="chart-title">
+                        {chart['name']} ({chart['code'][:6]}) 
+                        | 乖离: <span style="color:{'#d32f2f' if chart['current_bias']>0 else '#1976d2'}">{chart['current_bias']:+.2f}%</span> 
+                        | 历史分位: {chart['position']:.1f}%
+                    </div>
+                    <img src="cid:bias_{i}" style="max-width:100%; display:block; margin:5px 0;"><br>
+                    <img src="cid:boll_{i}" style="max-width:100%; display:block; margin:5px 0;">
+                </div>
+                """
+        
         html += "<p style='color:#999;font-size:11px;margin-top:20px;border-top:1px solid #eee;padding-top:10px;'>※ 自动化报告 | 数据源: Tushare Pro | 仅供参考</p></body></html>"
         
         msg.attach(MIMEText(html, 'html', 'utf-8'))
+        
+        # 📎 内嵌图片附件（Content-ID引用）
+        for i, chart in enumerate(extreme_charts):
+            for img_key, cid_prefix in [('bias_img', 'bias'), ('boll_img', 'boll')]:
+                if chart.get(img_key):
+                    img_data = base64.b64decode(chart[img_key])
+                    img = MIMEImage(img_data)
+                    img.add_header('Content-ID', f'<{cid_prefix}_{i}>')
+                    img.add_header('Content-Disposition', 'inline', filename=f'{cid_prefix}_{i}.png')
+                    msg.attach(img)
         
         with smtplib.SMTP_SSL(config['smtp_server'], config['smtp_port']) as server:
             server.login(config['sender'], config['auth_code'])
             server.sendmail(config['sender'], [config['receiver']], msg.as_string())
         
-        logging.info(f"✉️ 邮件发送成功 → {config['receiver']} (含{len(results)}条记录)")
+        logging.info(f"✉️ 邮件发送成功 → {config['receiver']} (表格{len(results)}条 + 图表{len(extreme_charts)}组)")
         return True
     except Exception as e:
         logging.error(f"❌ 邮件发送失败: {e}")
@@ -161,28 +215,6 @@ def send_bias_email(results: List[Dict], config: Dict) -> bool:
         logging.error(traceback.format_exc())
         return False
 
-
-def clean_benchmark(benchmark: str) -> str:
-    """清洗benchmark字段：1)去括号内容 2)去*95%+后缀 3)指数收益率→指数"""
-    if not benchmark or not isinstance(benchmark, str):
-        return benchmark
-    
-    # 1. 尾部是)，去除最后一个(及其中间内容
-    if benchmark.rstrip().endswith(')'):
-        idx = benchmark.rfind('(')
-        if idx != -1:
-            benchmark = benchmark[:idx].rstrip()
-    
-    # 2. 包含*95%+，截断该标记及之后内容
-    if '*95%+' in benchmark:
-        benchmark = benchmark.split('*95%+')[0].rstrip()
-    
-    # 3. 尾部"指数收益率"替换为"指数"
-    if benchmark.rstrip().endswith('指数收益率'):
-        benchmark = benchmark.rstrip()[:-5] + '指数'
-    
-    return benchmark.strip()
-    
 def fetch_etf_list(pro) -> Dict[str, str]:
     try:
         df = pro.fund_basic(market='E')
@@ -196,7 +228,7 @@ def fetch_etf_list(pro) -> Dict[str, str]:
         df = df[df['due_date'].isna()]
         df = df[df['benchmark'].notna()]
         
-        # df['benchmark'] = df['benchmark'].str.strip()
+        # 清洗benchmark字段（按规则1→2→3逐步处理）
         df['benchmark'] = df['benchmark'].apply(clean_benchmark)
         df = df[df['benchmark'] != '']
         df = df[df['invest_type'] == '被动指数型']
@@ -206,7 +238,6 @@ def fetch_etf_list(pro) -> Dict[str, str]:
         df['total_fee'] = df['m_fee'] + df['c_fee']
 
         df = df.sort_values(by=['benchmark', 'total_fee', 'issue_amount'], ascending=[True, True, False])
-        df.to_excel('a.xlsx')
         df_best = df.drop_duplicates(subset=['benchmark'], keep='first')
 
         etf_dict = dict(zip(df_best['ts_code'], df_best['name']))
@@ -288,9 +319,77 @@ class BiasAnalyzer:
             "bias_processed_series": bias_processed
         }
 
-    def run(self, etf_dict: Dict[str, str], export_dir: Optional[str] = None) -> List[Dict]:
+    def _plot_bias(self, result: Dict) -> Optional[str]:
+        """内存绘制乖离率图，返回 base64 字符串"""
+        df = result["df"]
+        bias_series = result.get("bias_processed_series", result["df"]["bias_20"])
+        
+        fig, ax = plt.subplots(figsize=(12, 4), dpi=100)
+        ax.plot(df["trade_date"], bias_series, label="乖离率(处理后)", color="#2E86AB", linewidth=1)
+        if result["outlier_method"] != 'none':
+            ax.plot(df["trade_date"], df["bias_20"], label="原始", color="#E67E22", linewidth=0.8, alpha=0.6)
+        
+        ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.4, alpha=0.5, label="0轴")
+        ax.axhline(y=result["bias_mean"], color="#A23B72", linestyle=":", linewidth=0.7, label="均值")
+        ax.axhline(y=result["bias_processed"], color="#F18F01", linestyle="-", linewidth=1.2, label="当前")
+        
+        for pct_val, color, alpha in [(result['bias_p10'], '#90CAF9', 0.25), (result['bias_p25'], '#4FC3F7', 0.35),
+                                      (result['bias_p50'], '#FFB300', 0.5), (result['bias_p75'], '#EF9A9A', 0.35),
+                                      (result['bias_p90'], '#E57373', 0.25)]:
+            ax.axhline(y=pct_val, color=color, linestyle=':', linewidth=0.5, alpha=alpha)
+        
+        mean, std = result["bias_mean"], result["bias_std"]
+        ax.fill_between(df["trade_date"], mean-2*std, mean+2*std, color="#E53935", alpha=0.08, label="±2σ")
+        ax.fill_between(df["trade_date"], mean-std, mean+std, color="#81C784", alpha=0.12, label="±1σ")
+        
+        method_tag = {'winsorize':f'[W{Config.WINSORIZE_LIMITS[0]*100:.0f}-{Config.WINSORIZE_LIMITS[1]*100:.0f}%]'}
+        ax.set_title(f"{result['code'][:6]} {result['name']} - BIAS{Config.MA_PERIOD} {method_tag.get(result['outlier_method'], '')}", fontsize=9, pad=6)
+        ax.set_ylabel("乖离率(%)", fontsize=8)
+        ax.grid(True, linestyle=":", alpha=0.3)
+        ax.legend(loc='upper right', fontsize=6, framealpha=0.9, ncol=2)
+        
+        # 内存保存
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+        plt.close(fig)
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode('utf-8')
+
+    def _plot_bollinger(self, df: pd.DataFrame, code: str, name: str) -> Optional[str]:
+        """内存绘制收盘价+60日布林带图，返回 base64"""
+        if len(df) < 60: return None
+        
+        df_plot = df.copy()
+        close = df_plot["close"].values.astype(np.float64)
+        df_plot["ma60"] = ta.MA(close, 60)
+        std60 = ta.STDDEV(close, 60)
+        df_plot["upper"] = df_plot["ma60"] + 2 * std60
+        df_plot["lower"] = df_plot["ma60"] - 2 * std60
+        
+        fig, ax = plt.subplots(figsize=(12, 4), dpi=100)
+        ax.plot(df_plot["trade_date"], df_plot["close"], label="收盘价", color="#2E86AB", linewidth=1)
+        ax.plot(df_plot["trade_date"], df_plot["ma60"], label="MA60", color="#FF9800", linestyle="--", linewidth=0.8)
+        ax.plot(df_plot["trade_date"], df_plot["upper"], label="上轨(+2σ)", color="#E57373", linestyle=":", linewidth=0.6)
+        ax.plot(df_plot["trade_date"], df_plot["lower"], label="下轨(-2σ)", color="#81C784", linestyle=":", linewidth=0.6)
+        ax.fill_between(df_plot["trade_date"], df_plot["lower"], df_plot["upper"], color="#90CAF9", alpha=0.12)
+        
+        ax.set_title(f"{code[:6]} {name} - 价格+布林带(60日)", fontsize=9, pad=6)
+        ax.set_ylabel("价格", fontsize=8)
+        ax.grid(True, linestyle=":", alpha=0.3)
+        ax.legend(loc='upper right', fontsize=6, framealpha=0.9, ncol=2)
+        
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+        plt.close(fig)
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode('utf-8')
+
+    def run(self, etf_dict: Dict[str, str]) -> tuple:
+        """返回: (所有结果列表, 极低位图表数据列表)"""
         logging.info(f"⏳ 开始分析近 {self.lookback_years} 年的 {self.ma_period} 日乖离率...")
-        logging.info(f"🔧 异常值处理: {Config.OUTLIER_METHOD}")
+        logging.info(f"🔧 异常值处理: {Config.OUTLIER_METHOD} | 🎯 极低位阈值: <{Config.EXTREME_THRESHOLD}%")
+        
+        extreme_charts = []
         
         for i, (code, name) in enumerate(etf_dict.items(), 1):
             if i % 50 == 0: logging.info(f"📊 进度: {i}/{len(etf_dict)}")
@@ -298,67 +397,24 @@ class BiasAnalyzer:
             if raw is None: continue
             df = self.compute_bias(raw, self.ma_period)
             if df is None: continue
-            self.results.append(self.analyze_bias(df, code, name, Config.OUTLIER_METHOD))
-            if export_dir:
-                self._plot_bias(self.results[-1], export_dir)
+            
+            result = self.analyze_bias(df, code, name, Config.OUTLIER_METHOD)
+            self.results.append(result)
+            
+            # 🎯 仅极低位（分位<阈值）生成双图表
+            if result['current_position'] < Config.EXTREME_THRESHOLD:
+                bias_img = self._plot_bias(result)
+                boll_img = self._plot_bollinger(df, code, name)
+                if bias_img and boll_img:
+                    extreme_charts.append({
+                        "code": code, "name": name,
+                        "bias_img": bias_img, "boll_img": boll_img,
+                        "current_bias": result['bias_processed'],
+                        "position": result['current_position']
+                    })
         
         self._print_summary()
-        return self.results
-
-    def _plot_bias(self, result: Dict, export_dir: str) -> Optional[str]:
-        df = result["df"]
-        bias_series = result.get("bias_processed_series", result["df"]["bias_20"])
-        code_short = result["code"][:6]
-        name = result["name"]
-        
-        fig, ax = plt.subplots(figsize=(12, 5), dpi=100)
-        ax.plot(df["trade_date"], bias_series, label="乖离率(处理后)", color="#2E86AB", linewidth=1)
-        if result["outlier_method"] != 'none':
-            # ax.plot(df["trade_date"], df["bias_20"], label="原始", color="#CCCCCC", linewidth=0.5, alpha=0.4)
-            ax.plot(df["trade_date"], df["bias_20"], label="原始", color="#E67E22", linewidth=1.0, alpha=0.7)
-        
-        ax.axhline(y=0, color="gray", linestyle="--", linewidth=0.5, alpha=0.5, label="0轴")
-        ax.axhline(y=result["bias_mean"], color="#A23B72", linestyle=":", linewidth=0.8, label="均值")
-        ax.axhline(y=result["bias_processed"], color="#F18F01", linestyle="-", linewidth=1.5, label="当前")
-        
-        for pct_val, color, alpha in [(result['bias_p10'], '#90CAF9', 0.3), (result['bias_p25'], '#4FC3F7', 0.4),
-                                      (result['bias_p50'], '#FFB300', 0.6), (result['bias_p75'], '#EF9A9A', 0.4),
-                                      (result['bias_p90'], '#E57373', 0.3)]:
-            ax.axhline(y=pct_val, color=color, linestyle=':', linewidth=0.6, alpha=alpha)
-        
-        mean, std = result["bias_mean"], result["bias_std"]
-        ax.fill_between(df["trade_date"], mean-2*std, mean+2*std, color="#E53935", alpha=0.08, label="±2σ")
-        ax.fill_between(df["trade_date"], mean-std, mean+std, color="#81C784", alpha=0.15, label="±1σ")
-        
-        method_tag = {'winsorize':f'[W{Config.WINSORIZE_LIMITS[0]*100:.0f}-{Config.WINSORIZE_LIMITS[1]*100:.0f}%]'}
-        ax.set_title(f"{code_short} {name} - BIAS{Config.MA_PERIOD} {method_tag.get(result['outlier_method'], '')}", fontsize=10, pad=8)
-        ax.set_ylabel("乖离率(%)", fontsize=9)
-        ax.grid(True, linestyle=":", alpha=0.3)
-        
-        stats_text = (f"当前:{result['bias_processed']:+.2f}% | 分位:{result['current_position']:.1f}% | 均值:{result['bias_mean']:+.2f}%\n"
-                      f"─────────────────────────────\n"
-                      f"Max:{result['max_bias']:+.2f}%  │  P75:{result['bias_p75']:+.2f}%\n"
-                      f"P90:{result['bias_p90']:+.2f}%  │  P50:{result['bias_p50']:+.2f}%\n"
-                      f"P25:{result['bias_p25']:+.2f}%  │  P10:{result['bias_p10']:+.2f}%\n"
-                      f"Min:{result['min_bias']:+.2f}%  │   σ:{result['bias_std']:.2f}%")
-        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=7,
-                verticalalignment='top', horizontalalignment='left',
-                bbox=dict(boxstyle='round,pad=0.4', facecolor='#f5f5f5', alpha=0.92, edgecolor='#999', linewidth=0.5))
-        
-        ax.legend(loc='upper right', fontsize=6, framealpha=0.9, ncol=2)
-        
-        total = len(df)
-        interval = 1 if total <= 200 else 2 if total <= 400 else 3
-        ax.xaxis.set_major_locator(mdates.MonthLocator(interval=interval))
-        ax.xaxis.set_major_formatter(mdates.DateFormatter('%Y-%m'))
-        plt.setp(ax.xaxis.get_majorticklabels(), rotation=25, ha='right', fontsize=6)
-        
-        os.makedirs(export_dir, exist_ok=True)
-        date_str = datetime.now().strftime('%Y%m%d')
-        save_path = os.path.join(export_dir, f"bias_{safe_filename(name)}_{code_short}_{date_str}.png")
-        plt.savefig(save_path, dpi=100, bbox_inches="tight")
-        plt.close()
-        return save_path
+        return self.results, extreme_charts
 
     def _print_summary(self):
         if not self.results: return
@@ -387,11 +443,11 @@ def main():
         return
 
     analyzer = BiasAnalyzer(Config.TOKEN, Config.SERVER)
-    results = analyzer.run(etf_dict, export_dir=Config.EXPORT_DIR)
+    results, extreme_charts = analyzer.run(etf_dict)
     
     if Config.EMAIL_CONFIG.get("send_enabled") and results:
-        logging.info("📧 发送表格邮件...")
-        send_bias_email(results, Config.EMAIL_CONFIG)
+        logging.info("📧 发送表格+图表邮件...")
+        send_bias_email(results, extreme_charts, Config.EMAIL_CONFIG)
 
 if __name__ == '__main__':
     setup_font()

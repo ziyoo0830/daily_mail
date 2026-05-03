@@ -3,6 +3,7 @@
 """
 港股技术面全量扫描系统
 逻辑：获取港股列表 -> 全量技术因子评分 -> 动态风控计算 -> 邮件推送
+输出：按 1年回撤幅度(drop_1y) 倒序排列，超跌标的优先
 """
 import sys, io, os, smtplib
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
@@ -53,10 +54,20 @@ converter = OpenCC('t2s')
 # 2. 工具函数
 # ============================================
 def get_offset_date(days_offset):
+    """获取偏移日期，统一入口"""
     return (datetime.now() + timedelta(days=days_offset)).strftime('%Y%m%d')
 
 def clean_numeric(series):
     return pd.to_numeric(series, errors='coerce')
+
+def is_today_trading_day(today):
+    """查询交易日历（A股）"""
+    try:
+        df = pro.trade_cal(start_date=today, end_date=today, is_open='1')
+        return not df.empty
+    except Exception as e:
+        print(f"查询交易日历失败: {e}")
+        return False
 
 # ============================================
 # 3. 数据获取
@@ -176,7 +187,7 @@ def analyze_full_strategy(symbol, df):
         if len(df) < 60: return None
 
         cur = df['close'].iloc[-1]
-        # 基础数据质量过滤（防仙股/零流动性/异常波动干扰评分）
+        # 基础数据质量过滤
         if cur < 0.5 or df['amount'].tail(20).mean() < Config.MIN_AMOUNT: return None
         if df['close'].pct_change().tail(10).std() > 0.15: return None
 
@@ -272,25 +283,35 @@ def main():
             
         high_1y = df['close'].max()
         cur_price = df['close'].iloc[-1]
-        drop_1y = (high_1y - cur_price) / high_1y
+        drop_1y = (high_1y - cur_price) / high_1y  # 👈 数值型回撤
         
         res = analyze_full_strategy(ts_code, df)
         if res:
             res['name'] = name
             res['high_1y'] = round(high_1y, 3)
-            res['drop_1y'] = f"{drop_1y:.1%}"
+            res['drop_1y'] = f"{drop_1y:.1%}"      # 👈 显示用：百分比字符串
+            res['_drop_num'] = drop_1y              # 👈 排序用：数值型
             results.append(res)
             print(f"  [{len(results)}] {res['name']} | 评分:{res['score']} | 回撤:{res['drop_1y']} | {res['action']}")
 
     if results:
-        results.sort(key=lambda x: x['score'], reverse=True)
+        # 🔑 核心修改：按回撤幅度倒序排列（超跌优先）
+        results.sort(key=lambda x: x['_drop_num'], reverse=True)
+        
         df_out = pd.DataFrame(results)
         df_out['code'] = df_out['symbol'].str.replace('.HK','', regex=False)
         cols = ['code','name','score','price','high_1y','drop_1y','action','status','止损位','止盈位','盈亏比','signals']
-        send_email_report(df_out[cols], "📈 港股技术面全量精选")
+        send_email_report(df_out[cols], "📈 港股技术面全量精选（按回撤倒序）")
     else:
         print("⚠️ 全量分析未产生有效结果（可能数据不足或流动性未达标）")
         send_email_report(pd.DataFrame(), "📭 技术面扫描无有效标的")
 
+# ============================================
+# 7. 入口
+# ============================================
 if __name__ == "__main__":
-    main()
+    today = get_offset_date(0)
+    if is_today_trading_day(today):
+        main()
+    else:
+        print(f"今天不是交易日 {today}，跳过扫描")
