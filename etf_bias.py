@@ -3,6 +3,7 @@
 """
 ETF乖离率分析工具 - 邮件表格版（内存绘图+极低位图表内嵌）
 功能：动态获取场内ETF，智能筛选，计算20日乖离率，邮件发送彩色表格+极低位标的双图
+控制：通过 Config.WEEKDAY_EXECUTION 全局列表变量指定执行星期（0=周一,6=周日）
 """
 
 # ================= 导入区域 =================
@@ -14,7 +15,6 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.dates as mdates
-import os
 import re
 import logging
 import warnings
@@ -35,7 +35,7 @@ class Config:
     
     LOOKBACK_YEARS = 3.0
     MA_PERIOD = 20
-    DAYS_OFFSET = 4
+    DAYS_OFFSET = 0
     
     OUTLIER_METHOD = 'winsorize'
     WINSORIZE_LIMITS = (0.02, 0.98)
@@ -54,7 +54,10 @@ class Config:
         "send_enabled": True
     }
     
-    WEEKDAY_EXECUTION = [0, 1, 2, 3, 4, 5, 6]
+    # 🎯 执行日期控制：0=周一, 1=周二, ..., 6=周日
+    # 示例：[0,1,2,3,4] → 工作日执行 | [5,6] → 仅周末 | [0,2,4] → 周一/三/五
+    WEEKDAY_EXECUTION = [1, 3, ]  # 👈 修改此处控制执行日期
+    
     EXTREME_THRESHOLD = 5  # 🎯 极低位分位阈值(%)
 
 # ================= 全局初始化 =================
@@ -89,6 +92,7 @@ def is_trading_day(date_str: str, pro) -> bool:
         return False
 
 def is_execution_day() -> bool:
+    """判断今日是否在允许执行的星期列表中"""
     return datetime.now().weekday() in Config.WEEKDAY_EXECUTION
 
 def safe_filename(name: str) -> str:
@@ -425,8 +429,9 @@ class BiasAnalyzer:
 
 # ================= 主入口 =================
 def main():
+    # 🔹 执行日期校验（放在最前面）
     if not is_execution_day():
-        logging.info(f"⏭️ 今天星期{datetime.now().weekday()+1}不在执行列表{Config.WEEKDAY_EXECUTION}中，跳过")
+        logging.info(f"⏭️ 今天星期{datetime.now().weekday()+1}，不在执行列表{Config.WEEKDAY_EXECUTION}中，跳过")
         return
     
     today = get_offset_date(-Config.DAYS_OFFSET)
